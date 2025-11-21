@@ -1,48 +1,63 @@
 """
-Database Schemas
+Database Schemas for Company Operations App
 
-Define your MongoDB collection schemas here using Pydantic models.
-These schemas are used for data validation in your application.
-
-Each Pydantic model represents a collection in your database.
-Model name is converted to lowercase for the collection name:
-- User -> "user" collection
-- Product -> "product" collection
-- BlogPost -> "blogs" collection
+Each Pydantic model represents a MongoDB collection.
+Collection name is the lowercase of the class name.
 """
-
-from pydantic import BaseModel, Field
-from typing import Optional
-
-# Example schemas (replace with your own):
+from pydantic import BaseModel, Field, EmailStr
+from typing import Optional, Literal
+from datetime import date
 
 class User(BaseModel):
     """
     Users collection schema
-    Collection name: "user" (lowercase of class name)
+    Collection name: "user"
     """
     name: str = Field(..., description="Full name")
-    email: str = Field(..., description="Email address")
-    address: str = Field(..., description="Address")
-    age: Optional[int] = Field(None, ge=0, le=120, description="Age in years")
+    email: EmailStr = Field(..., description="Email address")
+    role: Literal["employee", "core"] = Field("employee", description="Role in the company")
+    password_hash: str = Field(..., description="Hashed password (store hash, not plain text)")
     is_active: bool = Field(True, description="Whether user is active")
 
-class Product(BaseModel):
+class Task(BaseModel):
     """
-    Products collection schema
-    Collection name: "product" (lowercase of class name)
+    Tasks assigned for follow-ups and work tracking
+    Collection name: "task"
     """
-    title: str = Field(..., description="Product title")
-    description: Optional[str] = Field(None, description="Product description")
-    price: float = Field(..., ge=0, description="Price in dollars")
-    category: str = Field(..., description="Product category")
-    in_stock: bool = Field(True, description="Whether product is in stock")
+    title: str = Field(..., description="Task title")
+    description: Optional[str] = Field(None, description="Task details")
+    assignee_email: EmailStr = Field(..., description="Employee email to whom the task is assigned")
+    status: Literal["pending", "in_progress", "done"] = Field("pending")
+    due_date: Optional[date] = Field(None)
 
-# Add your own schemas here:
-# --------------------------------------------------
+class Report(BaseModel):
+    """
+    Daily reports submitted by employees
+    Collection name: "report"
+    """
+    employee_email: EmailStr = Field(...)
+    report_date: date = Field(..., description="Report date")
+    summary: str = Field(..., description="What was done")
+    hours_worked: float = Field(..., ge=0, le=24)
 
-# Note: The Flames database viewer will automatically:
-# 1. Read these schemas from GET /schema endpoint
-# 2. Use them for document validation when creating/editing
-# 3. Handle all database operations (CRUD) directly
-# 4. You don't need to create any database endpoints!
+class SalaryPayment(BaseModel):
+    """
+    Salary updates and payments
+    Collection name: "salarypayment"
+    """
+    employee_email: EmailStr = Field(...)
+    amount: float = Field(..., ge=0)
+    month: str = Field(..., description="e.g., 2025-01")
+    notes: Optional[str] = None
+    status: Literal["pending", "paid"] = Field("paid")
+
+class FinanceRecord(BaseModel):
+    """
+    Revenue and spending records (core team only)
+    Collection name: "financerecord"
+    """
+    kind: Literal["revenue", "expense"] = Field(...)
+    amount: float = Field(..., ge=0)
+    category: str = Field(..., description="Category like Sales, Marketing, Ops")
+    description: Optional[str] = None
+    reference: Optional[str] = Field(None, description="Invoice/PO/Txn ref")
