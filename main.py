@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List, Literal
 from fastapi import FastAPI, HTTPException, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -306,6 +306,69 @@ def list_finance(current: AuthUser = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Only core can view finance records")
     docs = get_documents("financerecord", {})
     return [serialize_doc(d) for d in docs]
+
+# ------------------- Analytics (core only) -------------------
+
+def _last_n_months(n: int):
+    """Return list of months as YYYY-MM for the last n months, ascending."""
+    today = date.today().replace(day=1)
+    months = []
+    y, m = today.year, today.month
+    for _ in range(n):
+        months.append(f"{y:04d}-{m:02d}")
+        # decrement month
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    months.reverse()
+    return months
+
+@app.get("/analytics/summary")
+def analytics_summary(months: int = 6, current: AuthUser = Depends(get_current_user)):
+    if current.role != "core":
+        raise HTTPException(status_code=403, detail="Only core can view analytics")
+    months = max(1, min(months, 24))
+
+    # Finance aggregation by created_at month
+    finance_pipe = [
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m", "date": "$created_at"}},
+            "revenue": {"$sum": {"$cond": [{"$eq": ["$kind", "revenue"]}, "$amount", 0]}},
+            "expense": {"$sum": {"$cond": [{"$eq": ["$kind", "expense"]}, "$amount", 0]}},
+        }},
+        {"$project": {"_id": 0, "month": "$_id", "revenue": 1, "expense": 1}},
+        {"$sort": {"month": 1}},
+    ]
+    finance_raw = list(db["financerecord"].aggregate(finance_pipe))
+    finance_map = {x["month"]: x for x in finance_raw}
+
+    # Salary aggregation by provided month field
+    salary_pipe = [
+        {"$group": {"_id": "$month", "total": {"$sum": "$amount"}}},
+        {"$project": {"_id": 0, "month": "$_id", "total": 1}},
+        {"$sort": {"month": 1}},
+    ]
+    salary_raw = list(db["salarypayment"].aggregate(salary_pipe))
+    salary_map = {x["month"]: x["total"] for x in salary_raw}
+
+    months_list = _last_n_months(months)
+    finance_series = {"revenue": [], "expense": [], "net": []}
+    salary_series = {"total": []}
+
+    for m in months_list:
+        rev = float(finance_map.get(m, {}).get("revenue", 0))
+        exp = float(finance_map.get(m, {}).get("expense", 0))
+        finance_series["revenue"].append(rev)
+        finance_series["expense"].append(exp)
+        finance_series["net"].append(rev - exp)
+        salary_series["total"].append(float(salary_map.get(m, 0)))
+
+    return {
+        "months": months_list,
+        "finance": finance_series,
+        "salary": salary_series,
+    }
 
 if __name__ == "__main__":
     import uvicorn
